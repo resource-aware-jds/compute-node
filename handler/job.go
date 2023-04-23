@@ -29,6 +29,11 @@ func (j *JobHandler) SendJob(context context.Context, job *proto.Job) (*emptypb.
 }
 
 func (j *JobHandler) ReportJob(context context.Context, report *proto.ReportJobRequest) (*emptypb.Empty, error) {
+	if report.TotalJob == report.CurrentJob {
+		jobIdStr := strconv.Itoa(int(report.JobID))
+		containerName := "rajds-" + jobIdStr
+		go j.jobService.RemoveContainer(containerName)
+	}
 	logrus.Info("Job id: ", report.JobID, " Current: ", report.CurrentJob, " Total: ", report.TotalJob)
 	return &emptypb.Empty{}, nil
 }

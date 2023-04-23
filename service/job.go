@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -11,16 +12,19 @@ import (
 )
 
 type jobService struct {
-	appConfig config.Config
+	appConfig    config.Config
+	dockerClient *client.Client
 }
 
 type JobService interface {
 	RunJob(dockerImage string, name string, options types.ImagePullOptions, jobID string) error
+	RemoveContainer(containerID string) error
 }
 
-func NewJobService(appConfig config.Config) JobService {
+func NewJobService(appConfig config.Config, dockerClient *client.Client) JobService {
 	return &jobService{
-		appConfig: appConfig,
+		appConfig:    appConfig,
+		dockerClient: dockerClient,
 	}
 }
 
@@ -29,29 +33,23 @@ func (j *jobService) RunJob(dockerImage string, name string, options types.Image
 	defer logrus.Info("Create container ", name, " success")
 
 	ctx := context.Background()
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		logrus.Error("Client connection error: ", err)
-		return err
-	}
-	defer cli.Close()
 
 	//Pull image
-	out, err := cli.ImagePull(ctx, dockerImage, options)
+	out, err := j.dockerClient.ImagePull(ctx, dockerImage, options)
 	if err != nil {
 		logrus.Warn("Pull image error: ", err)
+	} else {
+		defer out.Close()
 	}
-	defer out.Close()
-
 	// Create container
-	resp, err := cli.ContainerCreate(ctx, j.getContainerConfig(dockerImage, j.appConfig.GRPC_SERVER_PORT, jobIdStr), j.getHostConfig(), nil, nil, name)
+	resp, err := j.dockerClient.ContainerCreate(ctx, j.getContainerConfig(dockerImage, j.appConfig.GRPC_SERVER_PORT, jobIdStr), j.getHostConfig(), nil, nil, name)
 	if err != nil {
 		logrus.Error("Create container error: ", err)
 		return err
 	}
 
 	// Start container
-	if err := cli.ContainerStart(ctx, name, types.ContainerStartOptions{}); err != nil {
+	if err := j.dockerClient.ContainerStart(ctx, name, types.ContainerStartOptions{}); err != nil {
 		logrus.Error(err)
 		return err
 	}
@@ -71,4 +69,27 @@ func (j *jobService) getContainerConfig(dockerImage string, hostPort string, job
 		Image: dockerImage,
 		Env:   []string{"HOST_PORT=" + hostPort, "JOB_ID=" + jobID},
 	}
+}
+
+func (j *jobService) RemoveContainer(containerID string) error {
+	ctx := context.Background()
+	responseCh, errCh := j.dockerClient.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			logrus.Error(err)
+			return err
+		}
+	case response := <-responseCh:
+		if response.Error != nil {
+			logrus.Error(response.Error)
+			return errors.New(response.Error.Message)
+		}
+		err := j.dockerClient.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{})
+		if err != nil {
+			logrus.Error(err)
+			return err
+		}
+	}
+	return nil
 }
