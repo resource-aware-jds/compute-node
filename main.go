@@ -24,7 +24,7 @@ func init() {
 func main() {
 
 	//Job service
-	jobService := service.NewJobService()
+	jobService := service.NewJobService(appConfig)
 
 	//Handler
 	jobHandler := handler.NewJobGrpcServer(jobService)

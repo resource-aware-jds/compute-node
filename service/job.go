@@ -6,23 +6,25 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/resource-aware-jds/compute-node/config"
 	"github.com/sirupsen/logrus"
-	"io"
-	"os"
 )
 
 type jobService struct {
+	appConfig config.Config
 }
 
 type JobService interface {
-	RunJob(dockerImage string, name string, options types.ImagePullOptions) error
+	RunJob(dockerImage string, name string, options types.ImagePullOptions, jobID string) error
 }
 
-func NewJobService() JobService {
-	return &jobService{}
+func NewJobService(appConfig config.Config) JobService {
+	return &jobService{
+		appConfig: appConfig,
+	}
 }
 
-func (j *jobService) RunJob(dockerImage string, name string, options types.ImagePullOptions) error {
+func (j *jobService) RunJob(dockerImage string, name string, options types.ImagePullOptions, jobIdStr string) error {
 	logrus.Info("Creating container: ", name, " with image: ", dockerImage)
 	defer logrus.Info("Create container ", name, " success")
 
@@ -34,19 +36,15 @@ func (j *jobService) RunJob(dockerImage string, name string, options types.Image
 	}
 	defer cli.Close()
 
-	// Pull image
+	//Pull image
 	out, err := cli.ImagePull(ctx, dockerImage, options)
 	if err != nil {
-		logrus.Error("Pull image error: ", err)
-		return err
+		logrus.Warn("Pull image error: ", err)
 	}
 	defer out.Close()
-	io.Copy(os.Stdout, out)
 
 	// Create container
-	resp, err := cli.ContainerCreate(ctx, &container.Config{
-		Image: dockerImage,
-	}, nil, nil, nil, name)
+	resp, err := cli.ContainerCreate(ctx, j.getContainerConfig(dockerImage, j.appConfig.GRPC_SERVER_PORT, jobIdStr), j.getHostConfig(), nil, nil, name)
 	if err != nil {
 		logrus.Error("Create container error: ", err)
 		return err
@@ -60,4 +58,17 @@ func (j *jobService) RunJob(dockerImage string, name string, options types.Image
 
 	fmt.Println(resp.ID)
 	return nil
+}
+
+func (j *jobService) getHostConfig() *container.HostConfig {
+	return &container.HostConfig{
+		ExtraHosts: []string{"host.docker.internal:host-gateway"},
+	}
+}
+
+func (j *jobService) getContainerConfig(dockerImage string, hostPort string, jobID string) *container.Config {
+	return &container.Config{
+		Image: dockerImage,
+		Env:   []string{"HOST_PORT=" + hostPort, "JOB_ID=" + jobID},
+	}
 }

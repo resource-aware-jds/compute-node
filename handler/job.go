@@ -22,8 +22,9 @@ func NewJobGrpcServer(jobService service.JobService) *JobHandler {
 }
 
 func (j *JobHandler) SendJob(context context.Context, job *proto.Job) (*emptypb.Empty, error) {
-	containerName := "rajds-" + strconv.Itoa(int(job.JobID))
-	err := j.jobService.RunJob(job.DockerImage, containerName, types.ImagePullOptions{})
+	jobIdStr := strconv.Itoa(int(job.JobID))
+	containerName := "rajds-" + jobIdStr
+	err := j.jobService.RunJob(job.DockerImage, containerName, types.ImagePullOptions{}, jobIdStr)
 	return &emptypb.Empty{}, err
 }
 
