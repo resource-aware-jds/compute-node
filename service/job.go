@@ -34,6 +34,7 @@ func (j *jobService) RunJob(dockerImage string, name string, options types.Image
 	}
 	defer cli.Close()
 
+	// Pull image
 	out, err := cli.ImagePull(ctx, dockerImage, options)
 	if err != nil {
 		logrus.Error("Pull image error: ", err)
@@ -42,6 +43,7 @@ func (j *jobService) RunJob(dockerImage string, name string, options types.Image
 	defer out.Close()
 	io.Copy(os.Stdout, out)
 
+	// Create container
 	resp, err := cli.ContainerCreate(ctx, &container.Config{
 		Image: dockerImage,
 	}, nil, nil, nil, name)
@@ -50,6 +52,7 @@ func (j *jobService) RunJob(dockerImage string, name string, options types.Image
 		return err
 	}
 
+	// Start container
 	if err := cli.ContainerStart(ctx, name, types.ContainerStartOptions{}); err != nil {
 		logrus.Error(err)
 		return err
